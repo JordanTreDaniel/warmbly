@@ -624,6 +624,17 @@ That means Warmbly should stay conservative by default:
 - low spam rate matters more than open-rate screenshots
 - gradual warmup and distributed sending matter more than maximizing one mailbox or one worker
 
+### Silent failure modes (found in production 2026-10-19)
+
+The API returns 200 and does the wrong thing in these cases — a success status is not proof the write took the shape you asked for:
+
+- `POST /v1/contacts` and `PATCH /v1/contacts/:id` silently ignore top-level `source`/`source_detail` fields. The call returns 200 but stamps Warmbly's own defaults (`source=api`, `source_detail=all-users-warmbly-test-access`). Provenance must go in `custom_fields`
+- `sender_strategy=tags` with an empty tag-matched sender pool silently falls back to ALL active mailboxes in scope (`ResolveCampaignSenderPool`, `internal/repository/campaign_senders.go:64-70`). For a campaign that must send only from named mailboxes, use `sender_strategy=explicit` + `PUT /v1/campaigns/:id/senders`
+- `GET /v1/campaigns/:id/contacts` does not exist (404). Verify campaign membership via the contact list filtered on `campaigns[].id`
+- A campaign created with zero sequence steps is accepted but fails preflight with `Campaign must have at least one sequence` — add steps before expecting it to send
+
+Verification habit: after any sender-pool change, read back `GET /v1/campaigns/:id/senders` and confirm exactly the intended mailboxes — never assume the write took.
+
 ## Warmup Process
 
 Warmup exists to build and maintain sender reputation by sending low-risk traffic gradually, spacing it out over time, and generating normal mailbox activity patterns instead of sudden bulk spikes.
